@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Indie Games</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- ─── HEADER ──────────────────────────────────────────── -->
+  <header>
+    <div class="logo">🎮 My Indie Games</div>
+    <nav>
+      <a href="#games">Games</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
+
+  <!-- ─── HERO / LANDING BANNER ───────────────────────────── -->
+  <section class="hero">
+    <h1>Play. Enjoy. Share.</h1>
+    <p>Welcome to my small corner of the internet where I publish the games I build in my spare time.</p>
+    <a href="#games" class="btn primary">Browse Games ↓</a>
+  </section>
+
+  <!-- ─── GAME GALLERY ────────────────────────────────────── -->
+  <main id="games">
+    <h2>Games</h2>
+
+    <div class="filters">
+      <input id="searchBar" type="text" placeholder="Search by title …">
+      <select id="genreFilter">
+        <option value="all">All Genres</option>
+      </select>
+    </div>
+
+    <div id="gameGrid" class="game-grid"><!-- JS injects cards here --></div>
+  </main>
+
+  <!-- ─── ABOUT ───────────────────────────────────────────── -->
+  <section id="about" class="about">
+    <h2>About Me</h2>
+    <p>
+      Hey! I’m an indie developer who loves building fun, short-form games.
+      Most of them are made with web technology so you can play right in your browser.
+      If you try a game and enjoy (or break!) it, drop me a note ↓
+    </p>
+  </section>
+
+  <!-- ─── CONTACT ─────────────────────────────────────────── -->
+  <section id="contact" class="contact">
+    <h2>Contact</h2>
+    <p>Email: <a href="mailto:me@example.com">me@example.com</a></p>
+    <p>Twitter: <a href="https://twitter.com/yourhandle">@yourhandle</a></p>
+  </section>
+
+  <footer>© <span id="year"></span> Your Name</footer>
+
+  <script src="js/script.js"></script>
+</body>
+</html>

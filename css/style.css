@@ -1,0 +1,49 @@
+/* -- RESET & BASICS -------------------------------- */
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;}
+body{line-height:1.6;color:#f3f3f3;background:#121212;}
+a{color:#4da6ff;text-decoration:none;}
+h1,h2{font-weight:700;line-height:1.2;margin-bottom:.5em;}
+.btn{display:inline-block;padding:.7em 1.4em;border-radius:4px;font-weight:600;}
+.btn.primary{background:#ff5858;color:#fff;transition:background .25s;}
+.btn.primary:hover{background:#ff3030;}
+
+/* -- HEADER --------------------------------------- */
+header{display:flex;justify-content:space-between;align-items:center;padding:1rem 2rem;background:#181818;position:sticky;top:0;z-index:99;}
+.logo{font-size:1.3rem;font-weight:700;}
+nav a{margin-left:1.2rem;position:relative;}
+nav a::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:2px;background:#4da6ff;transition:.3s;}
+nav a:hover::after{width:100%;}
+
+/* -- HERO ----------------------------------------- */
+.hero{padding:4rem 2rem;text-align:center;background:linear-gradient(to bottom right,#282828,#181818);}
+.hero h1{font-size:2.7rem;margin-bottom:.4rem;}
+.hero p{max-width:600px;margin:0 auto 1.5rem;}
+@media(min-width:600px){.hero h1{font-size:3rem;}}
+
+/* -- GAME GRID ------------------------------------ */
+main{padding:3rem 2rem;max-width:1300px;margin:auto;}
+.filters{display:flex;flex-wrap:wrap;gap:.7rem;margin-bottom:1.5rem;}
+#searchBar{flex:2 1 200px;padding:.6rem;border:1px solid #333;border-radius:4px;background:#1e1e1e;color:#fff;}
+#genreFilter{flex:1 1 150px;padding:.6rem;border:1px solid #333;border-radius:4px;background:#1e1e1e;color:#fff;}
+
+.game-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1.4rem;}
+.card{display:flex;flex-direction:column;border:1px solid #232323;border-radius:8px;overflow:hidden;background:#1b1b1b;transition:transform .2s;}
+.card:hover{transform:translateY(-4px);}
+.card img{width:100%;aspect-ratio:16/9;object-fit:cover;}
+.card-body{padding:1rem;flex:1;display:flex;flex-direction:column;}
+.tags{margin:.4rem 0 .8rem;}
+.tag{display:inline-block;background:#333;color:#aaa;font-size:.75rem;padding:.2em .55em;border-radius:3px;margin:.1rem .2rem 0 0;}
+.card h3{font-size:1.2rem;margin-bottom:.3rem;color:#fff;}
+.card p{flex:1;font-size:.9rem;color:#cfcfcf;}
+.card-actions{margin-top:1rem;display:flex;gap:.5rem;}
+.card-actions a{flex:1;text-align:center;border:1px solid #4da6ff;padding:.55em;border-radius:4px;font-weight:600;font-size:.85rem;}
+.card-actions a.play{background:#4da6ff;color:#fff;}
+.card-actions a.repo:hover, .card-actions a.play:hover{opacity:.85;}
+
+/* -- ABOUT & CONTACT ------------------------------ */
+.about, .contact{padding:2.5rem 2rem;background:#181818;}
+.about p, .contact p{max-width:800px;margin:auto;}
+.contact a{color:#ff5858;}
+
+/* -- FOOTER --------------------------------------- */
+footer{text-align:center;padding:1.4rem;background:#141414;font-size:.85rem;color:#777;}
