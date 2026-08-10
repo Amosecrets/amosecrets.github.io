@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diff</title>
+<style>
+  :root {
+    --peach:  #D6B9A4;
+    --teal:   #3A837D;
+    --coral:  #DE5969;
+    --orange: #DDA280;
+    --sage:   #95C2BD;
+  }
+  * { box-sizing: border-box; margin: 0; }
+
+  body {
+    background: var(--peach);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #2e2622;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  .panes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  textarea {
+    width: 100%;
+    height: 240px;
+    padding: 14px;
+    border: 2px solid var(--teal);
+    border-radius: 6px;
+    background: #f3e9df;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+  textarea:focus {
+    outline: 3px solid var(--sage);
+    outline-offset: 1px;
+  }
+  textarea::placeholder { color: #a08877; }
+
+  .actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin: 20px auto;
+  }
+  button {
+    font: inherit;
+    font-size: 15px;
+    padding: 10px 28px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: #fff;
+  }
+  button:focus-visible { outline: 3px solid #2e2622; outline-offset: 2px; }
+  #compare { background: var(--teal); }
+  #compare:hover { background: #2f6d68; }
+  #reset { background: var(--coral); }
+  #reset:hover { background: #c94a5a; }
+
+  #result {
+    display: none;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  #result.on { display: grid; }
+
+  .line {
+    background: #f3e9df;
+    border-left: 2px solid var(--orange);
+    border-right: 2px solid var(--orange);
+    padding: 0 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 1.5em;
+  }
+  .line.first {
+    border-top: 2px solid var(--orange);
+    border-radius: 6px 6px 0 0;
+    padding-top: 10px;
+  }
+  .line.last {
+    border-bottom: 2px solid var(--orange);
+    border-radius: 0 0 6px 6px;
+    padding-bottom: 10px;
+  }
+  .line.del { background: color-mix(in srgb, var(--coral) 22%, transparent); }
+  .line.add { background: color-mix(in srgb, var(--sage) 40%, transparent); }
+  .line.empty { background: repeating-linear-gradient(45deg, transparent, transparent 5px, #00000010 5px, #00000010 6px); }
+  mark.del { background: var(--coral); color: #fff; border-radius: 2px; padding: 0 1px; }
+  mark.add { background: var(--teal); color: #fff; border-radius: 2px; padding: 0 1px; }
+
+  @media (max-width: 700px) {
+    .panes { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="panes">
+  <textarea id="a" placeholder="Text 1"></textarea>
+  <textarea id="b" placeholder="Text 2"></textarea>
+</div>
+
+<div class="actions">
+  <button id="compare">Compare</button>
+  <button id="reset">Reset</button>
+</div>
+
+<div id="result"></div>
+
+<script>
+// Generic LCS diff over an array of tokens -> ops: {t:'eq'|'del'|'add', v}
+function diff(a, b) {
+  const n = a.length, m = b.length;
+  // trim common prefix/suffix for speed
+  let s = 0;
+  while (s < n && s < m && a[s] === b[s]) s++;
+  let e = 0;
+  while (e < n - s && e < m - s && a[n - 1 - e] === b[m - 1 - e]) e++;
+  const ca = a.slice(s, n - e), cb = b.slice(s, m - e);
+  const N = ca.length, M = cb.length;
+
+  const dp = Array.from({ length: N + 1 }, () => new Uint32Array(M + 1));
+  for (let i = N - 1; i >= 0; i--)
+    for (let j = M - 1; j >= 0; j--)
+      dp[i][j] = ca[i] === cb[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const ops = [];
+  for (let k = 0; k < s; k++) ops.push({ t: 'eq', v: a[k] });
+  let i = 0, j = 0;
+  while (i < N && j < M) {
+    if (ca[i] === cb[j]) { ops.push({ t: 'eq', v: ca[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ t: 'del', v: ca[i] }); i++; }
+    else { ops.push({ t: 'add', v: cb[j] }); j++; }
+  }
+  while (i < N) { ops.push({ t: 'del', v: ca[i++] }); }
+  while (j < M) { ops.push({ t: 'add', v: cb[j++] }); }
+  for (let k = e; k > 0; k--) ops.push({ t: 'eq', v: a[n - k] });
+  return ops;
+}
+
+const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+const words = t => t.match(/\S+|\s+/g) || [];
+
+// word-level diff of a changed line pair -> [htmlLeft, htmlRight]
+function inlineDiff(x, y) {
+  let L = '', R = '';
+  for (const op of diff(words(x), words(y))) {
+    const v = esc(op.v);
+    if (op.t === 'eq') { L += v; R += v; }
+    else if (op.t === 'del') L += '<mark class="del">' + v + '</mark>';
+    else R += '<mark class="add">' + v + '</mark>';
+  }
+  return [L, R];
+}
+
+function render() {
+  const a = document.getElementById('a').value.split('\n');
+  const b = document.getElementById('b').value.split('\n');
+  const ops = diff(a, b);
+
+  // group into runs so adjacent del+add become "modified" pairs
+  const left = [], right = [];
+  let k = 0;
+  while (k < ops.length) {
+    if (ops[k].t === 'eq') {
+      left.push({ c: '', h: esc(ops[k].v) });
+      right.push({ c: '', h: esc(ops[k].v) });
+      k++;
+      continue;
+    }
+    const dels = [], adds = [];
+    while (k < ops.length && ops[k].t !== 'eq') {
+      (ops[k].t === 'del' ? dels : adds).push(ops[k].v);
+      k++;
+    }
+    const pairs = Math.min(dels.length, adds.length);
+    for (let p = 0; p < pairs; p++) {
+      const [hl, hr] = inlineDiff(dels[p], adds[p]);
+      left.push({ c: 'del', h: hl });
+      right.push({ c: 'add', h: hr });
+    }
+    for (let p = pairs; p < dels.length; p++) {
+      left.push({ c: 'del', h: esc(dels[p]) });
+      right.push({ c: 'empty', h: '' });
+    }
+    for (let p = pairs; p < adds.length; p++) {
+      left.push({ c: 'empty', h: '' });
+      right.push({ c: 'add', h: esc(adds[p]) });
+    }
+  }
+
+  // interleave into one grid: each left/right pair shares a grid row,
+  // so wrapped lines can never push the panes out of alignment
+  const cell = (l, pos) => '<div class="line ' + l.c + pos + '">' + l.h + '</div>';
+  let html = '';
+  for (let r = 0; r < left.length; r++) {
+    const pos = (r === 0 ? ' first' : '') + (r === left.length - 1 ? ' last' : '');
+    html += cell(left[r], pos) + cell(right[r], pos);
+  }
+  const res = document.getElementById('result');
+  res.innerHTML = html;
+  res.classList.add('on');
+}
+
+document.getElementById('compare').addEventListener('click', render);
+document.getElementById('reset').addEventListener('click', () => {
+  document.getElementById('a').value = '';
+  document.getElementById('b').value = '';
+  const res = document.getElementById('result');
+  res.innerHTML = '';
+  res.classList.remove('on');
+});
+</script>
+</body>
+</html>
