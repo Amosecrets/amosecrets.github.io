@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html>
+<!-- No CSS anywhere. Black & white via legacy body attributes (HTML, not CSS). -->
 <body text="black" bgcolor="white" link="black" vlink="black" alink="black">
 <pre id="screen"></pre>
 <script>
 //  ,esc,up,down,enter,tab,s,r,!,=,'
+
 let games = [];
 let shown = [];
 let query = "";
@@ -9989,15 +9991,19 @@ function bubbleRow(ey) {
   return out;
 }
 
-function trackPt(x, y) {
+function trackPt(x, y, gest) {
   const tN = performance.now();
   mmPts.push([x, y, tN]);
   if (mmPts.length > 6) mmPts.shift();
-  if (gTrail.length && tN - gTrail[gTrail.length - 1][2] > 300) gTrail = [];
-  gTrail.push([x, y, tN]);
-  if (gTrail.length > 200) gTrail.shift();
-  if (gT) clearTimeout(gT);
-  gT = setTimeout(gestClass, 170);
+  // gestures need a held button (or a finger): a bare hover sweep across
+  // the window is not an intent to open Dasher / toggle stats
+  if (gest) {
+    if (gTrail.length && tN - gTrail[gTrail.length - 1][2] > 300) gTrail = [];
+    gTrail.push([x, y, tN]);
+    if (gTrail.length > 200) gTrail.shift();
+    if (gT) clearTimeout(gT);
+    gT = setTimeout(gestClass, 170);
+  }
   const dtK = Math.min(Math.max(tN - kfT, 4), 120);
   if (tN - kfT > 400) { kfX = null; kfY = null; }
   kfX = immStep(kfX, x, dtK);
@@ -10033,7 +10039,9 @@ function predictEndpoint() {
 }
 
 document.addEventListener("mousemove", e => {
-  trackPt(e.clientX, e.clientY);
+  const drag = (e.buttons & 1) === 1;
+  if (!drag && gTrail.length) { gTrail = []; if (gT) { clearTimeout(gT); gT = null; } }
+  trackPt(e.clientX, e.clientY, drag);
   if (++mmCnt % 3 || mmPts.length < 4 || !booted || statsMode || dsh || !rowEls.length) return;
   predictEndpoint();
 });
@@ -10067,7 +10075,7 @@ document.addEventListener("pointermove", e => {
   if (e.pointerType !== "touch" || !tchSt) return;
   tchSt.moved = Math.max(tchSt.moved,
     Math.hypot(e.clientX - tchSt.x, e.clientY - tchSt.y));
-  trackPt(e.clientX, e.clientY);
+  trackPt(e.clientX, e.clientY, true);
   if (!tchSt.done && tchSt.edge && booted && !statsMode &&
       Math.abs(e.clientX - tchSt.x) > 70 &&
       Math.abs(e.clientX - tchSt.x) > 2 * Math.abs(e.clientY - tchSt.y)) {
@@ -10110,7 +10118,208 @@ document.addEventListener("click", e => {
 }, true);
 
 let audioOn = localStorage.getItem("aud") !== "0";
-let ac = null, geigT = null, predHn = 0.5, predHt = 0;
+let ac = null, predHn = 0.5, predHt = 0;
+
+// mix console (dB). Trims sized so vel ~0.15-0.5 lands near the old
+// absolute levels once the compressor's ~+11dB makeup is paid by master.
+const MIX = { master: -11, bed: 0, noise: -28, pulse: -31, tri: -29,
+              pluck: -30 };
+const dbGain = db => Math.pow(10, db / 20);
+let mixMaster = null, mixBus = null, apu = null;
+
+function mixInit() {
+  // buses -> master -> highshelf -8dB@4k -> compressor -> softclip -> out
+  mixMaster = ac.createGain();
+  mixMaster.gain.value = dbGain(MIX.master);
+  const shelf = ac.createBiquadFilter();
+  shelf.type = "highshelf";
+  shelf.frequency.value = 4000;
+  shelf.gain.value = -8;
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -24;
+  comp.knee.value = 12;
+  comp.ratio.value = 4;
+  comp.attack.value = 0.003;
+  comp.release.value = 0.25;
+  const clip = ac.createWaveShaper();
+  const cv = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    const x = i / 511.5 - 1;
+    cv[i] = Math.tanh(2 * x) / 2;
+  }
+  clip.curve = cv;
+  mixMaster.connect(shelf);
+  shelf.connect(comp);
+  comp.connect(clip);
+  clip.connect(ac.destination);
+  mixBus = {};
+  ["bed", "noise", "pulse", "tri", "pluck"].forEach(k => {
+    const g = ac.createGain();
+    g.gain.value = dbGain(MIX[k]);
+    g.connect(mixMaster);
+    mixBus[k] = g;
+  });
+}
+
+function duckMaster(on) {
+  if (!ac || !mixMaster) return;
+  try {
+    const t = ac.currentTime;
+    mixMaster.gain.cancelScheduledValues(t);
+    mixMaster.gain.setValueAtTime(mixMaster.gain.value, t);
+    mixMaster.gain.linearRampToValueAtTime(
+      dbGain(MIX.master) * (on ? 0.12 : 1), t + (on ? 0.05 : 0.3));
+  } catch (e) {}
+}
+
+function apuInit() {
+  // NES-flavored rack: duty pulses, 4-bit stepped triangle, LFSR noise
+  apu = {};
+  const pw = duty => {
+    const nH = 10;
+    const re = new Float32Array(nH + 1), im = new Float32Array(nH + 1);
+    for (let n = 1; n <= nH; n++)
+      re[n] = 2 / (n * Math.PI) * Math.sin(n * Math.PI * duty);
+    return ac.createPeriodicWave(re, im);
+  };
+  apu.duty = { d12: pw(0.125), d25: pw(0.25), d50: pw(0.5) };
+  const tsq = [];
+  for (let i = 15; i >= 0; i--) tsq.push(i);
+  for (let i = 0; i <= 15; i++) tsq.push(i);
+  const nH = 16;
+  const re = new Float32Array(nH + 1), im = new Float32Array(nH + 1);
+  for (let n = 1; n <= nH; n++) {
+    let cr = 0, ci = 0;
+    for (let k = 0; k < 32; k++) {
+      const v = (tsq[k] - 7.5) / 7.5, ph = 2 * Math.PI * n * k / 32;
+      cr += v * Math.cos(ph);
+      ci += v * Math.sin(ph);
+    }
+    re[n] = cr / 16;
+    im[n] = ci / 16;
+  }
+  apu.tri = ac.createPeriodicWave(re, im);
+  const lfsr = (short2, rate) => {
+    // 15-bit LFSR, sample-and-hold at `rate` (sub-rate = dark spectrum)
+    const sr = ac.sampleRate, len = sr | 0;
+    const buf = ac.createBuffer(1, len, sr), ch = buf.getChannelData(0);
+    let r = 1, v = 0;
+    const hold = Math.max(1, Math.round(sr / rate));
+    for (let i = 0; i < len; i++) {
+      if (i % hold === 0) {
+        const b = (r ^ (r >> (short2 ? 6 : 1))) & 1;
+        r = (r >> 1) | (b << 14);
+        v = (r & 1) ? 1 : -1;
+      }
+      ch[i] = v;
+    }
+    return buf;
+  };
+  apu.nzLo = lfsr(false, 7000);
+  apu.nzHi = lfsr(false, 22000);
+  apu.nzMetal = lfsr(true, 16000);
+}
+
+function nesQ(f) {
+  // snap to the 2A03 11-bit period table; melodic ceiling ~1.25kHz
+  f = Math.min(f, 1250);
+  const P = Math.max(8, Math.min(2047, Math.round(1789773 / (16 * f) - 1)));
+  return 1789773 / (16 * (P + 1));
+}
+
+function panNode(node, pan) {
+  if (pan === undefined || pan === null || !ac.createStereoPanner) return node;
+  try {
+    const p = ac.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    node.connect(p);
+    return p;
+  } catch (e) { return node; }
+}
+
+function nzHit(when, buf, vel, dur, bp, pan) {
+  if (!ac || !apu || !mixBus || !(vel > 0.001)) return;
+  try {
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    const off = Math.random() * Math.max(0.01, buf.duration - dur - 0.05);
+    const fl = ac.createBiquadFilter();
+    fl.type = "bandpass";
+    fl.frequency.value = bp;
+    fl.Q.value = 0.8;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(vel, when + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0005, when + dur);
+    g.gain.linearRampToValueAtTime(0, when + dur + 0.01);
+    src.connect(fl);
+    fl.connect(g);
+    panNode(g, pan).connect(mixBus.noise);
+    src.start(when, off);
+    src.stop(when + dur + 0.02);
+  } catch (e) {}
+}
+
+function pulseHit(when, freq, duty, vel, dur, pan) {
+  if (!ac || !apu || !mixBus || !(vel > 0.001) || !(freq > 20)) return;
+  try {
+    const o = ac.createOscillator();
+    o.setPeriodicWave(apu.duty[duty] || apu.duty.d50);
+    o.frequency.value = nesQ(freq);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(vel, when + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0005, when + dur);
+    g.gain.linearRampToValueAtTime(0, when + dur + 0.01);
+    o.connect(g);
+    panNode(g, pan).connect(mixBus.pulse);
+    o.start(when);
+    o.stop(when + dur + 0.03);
+  } catch (e) {}
+}
+
+function triNote(when, freq, vel, dur) {
+  if (!ac || !apu || !mixBus || !(vel > 0.001) || !(freq > 20)) return;
+  try {
+    const o = ac.createOscillator();
+    o.setPeriodicWave(apu.tri);
+    o.frequency.value = nesQ(freq);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(vel, when + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.001, when + dur);
+    g.gain.linearRampToValueAtTime(0, when + dur + 0.02);
+    o.connect(g);
+    g.connect(mixBus.tri);
+    o.start(when);
+    o.stop(when + dur + 0.04);
+  } catch (e) {}
+}
+
+// lookahead scheduler: one clock, events land on ac.currentTime not
+// setTimeout jitter. Layer fn(t) schedules at exact t, returns next dt.
+const SCHED = { look: 0.15, tick: 25, step: 0.32, layers: {}, t: null };
+
+function schedAdd(name, fn) {
+  SCHED.layers[name] = { fn, next: 0 };
+}
+
+function schedLoop() {
+  if (SCHED.t) { clearTimeout(SCHED.t); SCHED.t = null; }
+  if (!ac || !audioOn) return;
+  const now = ac.currentTime, hor = now + SCHED.look;
+  for (const k in SCHED.layers) {
+    const L = SCHED.layers[k];
+    if (L.next < now - 0.2) L.next = now + 0.03 + Math.random() * 0.05;
+    let n = 0;
+    while (L.next < hor && n++ < 50) {
+      let dt = 0;
+      try { dt = L.fn(L.next); } catch (e) {}
+      L.next += dt > 0.01 ? dt : SCHED.step;
+    }
+  }
+  SCHED.t = setTimeout(schedLoop, SCHED.tick);
+}
 
 function predEntropy() {
   try {
@@ -10123,37 +10332,17 @@ function predEntropy() {
   } catch (e) { return 0.5; }
 }
 
-function geigerTick() {
-  if (!ac || !audioOn) return;
-  try {
-    const buf = ac.createBuffer(1, 160, ac.sampleRate);
-    const ch = buf.getChannelData(0);
-    for (let i = 0; i < 160; i++)
-      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / 26);
-    const src = ac.createBufferSource();
-    src.buffer = buf;
-    const gn = ac.createGain();
-    gn.gain.value = 0.02;
-    src.connect(gn);
-    gn.connect(ac.destination);
-    src.start();
-  } catch (e) {}
-}
-
-function geigerLoop() {
-  if (geigT) { clearTimeout(geigT); geigT = null; }
-  if (!audioOn || !ac) return;
+function geigerFn(t) {
   if (Date.now() - predHt > 60000) {
     predHn = predEntropy();
     predHt = Date.now();
   }
+  nzHit(t, apu.nzLo, 0.5, 0.025, 1100 + 900 * predHn);
   const lam = 0.15 + 2.6 * predHn;
-  const dt = -Math.log(Math.random() || 1e-9) / lam * 1000;
-  geigT = setTimeout(() => { geigerTick(); geigerLoop(); },
-                     Math.max(40, Math.min(dt, 15000)));
+  return Math.max(0.04, Math.min(-Math.log(Math.random() || 1e-9) / lam, 15));
 }
 
-let droneOsc = null, droneG = null, droneT = null, eucT = null, eucStep = 0;
+let droneOsc = null, droneG = null, droneT = null, eucStep = 0;
 const DRONE_R = [1, 1.25, 1.5, 1.75, 2];
 
 function droneInit() {
@@ -10167,7 +10356,7 @@ function droneInit() {
       const g = ac.createGain();
       g.gain.value = 0;
       o.connect(g);
-      g.connect(ac.destination);
+      g.connect(mixBus.bed);
       o.start();
       droneOsc.push(o);
       droneG.push(g);
@@ -10288,99 +10477,64 @@ function sievePattern() {
   return pat;
 }
 
-function euclidTick() {
-  if (!ac || !audioOn) return;
-  try {
-    const buf = ac.createBuffer(1, 90, ac.sampleRate);
-    const ch = buf.getChannelData(0);
-    for (let i = 0; i < 90; i++)
-      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / 12);
-    const src = ac.createBufferSource();
-    src.buffer = buf;
-    const gn = ac.createGain();
-    gn.gain.value = 0.011;
-    src.connect(gn);
-    gn.connect(ac.destination);
-    src.start();
-    if (euclidLoop.deg !== null && euclidLoop.deg !== undefined && eucStep % 4 === 0)
-      ksPluck(220 * Math.pow(2, euclidLoop.deg / 12), 0.0085,
-              euclidLoop.pan !== undefined ? euclidLoop.pan : 0);
-  } catch (e) {}
-}
-
-function euclidLoop() {
-  if (eucT) { clearTimeout(eucT); eucT = null; }
-  if (!audioOn || !ac) return;
-  if (!euclidLoop.pat || Date.now() - (euclidLoop.t || 0) > 60000) {
-    euclidLoop.alt = !euclidLoop.alt;
+function euclidFn(t) {
+  const E = euclidFn;
+  if (!E.pat || Date.now() - (E.t || 0) > 60000) {
+    E.alt = !E.alt;
     let sp = null;
-    if (euclidLoop.alt) { try { sp = sievePattern(); } catch (e) {} }
-    euclidLoop.pat = sp || euclidPattern();
-    euclidLoop.t = Date.now();
-    euclidLoop.deg = null;
-    euclidLoop.pan = 0;
+    if (E.alt) { try { sp = sievePattern(); } catch (e) {} }
+    E.metal = !!(E.alt && sp);
+    E.pat = sp || euclidPattern();
+    E.t = Date.now();
+    E.deg = null;
+    E.pan = 0;
     try {
       const pg = predictNext();
       const co = communities();
-      if (pg) euclidLoop.pan = panOf(pg);
+      if (pg) E.pan = panOf(pg);
       if (pg && co && co.k > 1 && co.lab[pg] !== undefined)
-        euclidLoop.deg = [0, 3, 5, 7, 10][co.lab[pg] % 5];
-      if (euclidLoop.deg !== null && euclidLoop.deg !== undefined) {
+        E.deg = [0, 3, 5, 7, 10][co.lab[pg] % 5];
+      if (E.deg !== null && E.deg !== undefined) {
         const kk = ksKey();
-        const rel = ((euclidLoop.deg - kk.root) % 12 + 12) % 12;
+        const rel = ((E.deg - kk.root) % 12 + 12) % 12;
         let bs = kk.scale[0], bd = 99;
         kk.scale.forEach(sd => {
           const d2 = Math.min(Math.abs(sd - rel), 12 - Math.abs(sd - rel));
           if (d2 < bd) { bd = d2; bs = sd; }
         });
-        euclidLoop.deg = (kk.root + bs) % 12;
+        E.deg = (kk.root + bs) % 12;
       }
     } catch (e) {}
   }
   eucStep = (eucStep + 1) % 16;
-  if (euclidLoop.pat[eucStep]) euclidTick();
-  eucT = setTimeout(euclidLoop, 320);
+  if (E.pat[eucStep])
+    nzHit(t, E.metal ? apu.nzMetal : apu.nzHi, 0.28, 0.03, 3000, E.pan);
+  if (E.deg !== null && E.deg !== undefined && eucStep % 4 === 0)
+    ksPluck(t, 220 * Math.pow(2, E.deg / 12), 0.27, E.pan);
+  return SCHED.step;
 }
 
-let risT = null;
 const risP = [0, 1 / 3, 2 / 3], risA = [0, 0, 0];
 
-function risClick(gain) {
-  if (!ac || !audioOn || !(gain > 0.0004)) return;
-  try {
-    const buf = ac.createBuffer(1, 70, ac.sampleRate);
-    const ch = buf.getChannelData(0);
-    for (let i = 0; i < 70; i++)
-      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / 9);
-    const src = ac.createBufferSource();
-    src.buffer = buf;
-    const gn = ac.createGain();
-    gn.gain.value = gain;
-    src.connect(gn);
-    gn.connect(ac.destination);
-    src.start();
-  } catch (e) {}
-}
-
-function risLoop() {
-  if (risT) { clearTimeout(risT); risT = null; }
-  if (!audioOn || !ac) return;
-  try {
-    if (risLoop.sk === undefined || Date.now() - (risLoop.st || 0) > 300000) {
-      risLoop.sk = streakDays();
-      risLoop.st = Date.now();
+function rissetFn(t) {
+  const R = rissetFn;
+  if (R.sk === undefined || Date.now() - (R.st || 0) > 300000) {
+    R.sk = streakDays();
+    R.st = Date.now();
+  }
+  const adv = 0.0008 + 0.0032 * Math.min(R.sk, 20) / 20;
+  for (let i = 0; i < 3; i++) {
+    risP[i] = (risP[i] + adv) % 1;
+    risA[i] += 0.1 * 0.9 * Math.pow(2, risP[i]);
+    if (risA[i] >= 1) {
+      risA[i] -= Math.floor(risA[i]);
+      // bandpass climbs an octave pair with phase: the accelerando
+      // reads in timbre as well as rate
+      nzHit(t, apu.nzLo, 0.15 * Math.pow(Math.sin(Math.PI * risP[i]), 2),
+            0.022, 500 * Math.pow(2, 2 * risP[i]));
     }
-    const adv = 0.0008 + 0.0032 * Math.min(risLoop.sk, 20) / 20;
-    for (let i = 0; i < 3; i++) {
-      risP[i] = (risP[i] + adv) % 1;
-      risA[i] += 0.1 * 0.9 * Math.pow(2, risP[i]);
-      if (risA[i] >= 1) {
-        risA[i] -= Math.floor(risA[i]);
-        risClick(0.006 * Math.pow(Math.sin(Math.PI * risP[i]), 2));
-      }
-    }
-  } catch (e) {}
-  risT = setTimeout(risLoop, 100);
+  }
+  return 0.1;
 }
 
 let ksC = null;
@@ -10421,83 +10575,52 @@ function ksKey() {
   return ksC;
 }
 
-let vossT = null, vossN = 0;
+let vossN = 0;
 const vossR = [Math.random(), Math.random(), Math.random(),
                Math.random(), Math.random()];
-function vossLoop() {
-  if (vossT) { clearTimeout(vossT); vossT = null; }
-  if (!audioOn || !ac) return;
-  try {
-    vossN = (vossN + 1) & 31;
-    let k = vossN, i = 0;
-    while (i < 4 && !(k & 1)) { k >>= 1; i++; }
-    vossR[i] = Math.random();
-    let v = 0;
-    vossR.forEach(r => { v += r; });
-    v /= 5;
-    const kk = ksKey();
-    const idx = Math.max(0, Math.min(13, Math.floor(v * 14)));
-    const f = 110 * Math.pow(2,
-      (kk.root + kk.scale[idx % 7]) / 12 + Math.floor(idx / 7));
-    const o = ac.createOscillator();
-    o.type = "triangle";
-    o.frequency.value = f;
-    const gn = ac.createGain();
-    gn.gain.setValueAtTime(0.0045, ac.currentTime);
-    gn.gain.exponentialRampToValueAtTime(0.0003, ac.currentTime + 0.5);
-    o.connect(gn);
-    gn.connect(ac.destination);
-    o.start();
-    o.stop(ac.currentTime + 0.55);
-  } catch (e) {}
-  vossT = setTimeout(vossLoop, 640);
+function vossFn(t) {
+  vossN = (vossN + 1) & 31;
+  let k = vossN, i = 0;
+  while (i < 4 && !(k & 1)) { k >>= 1; i++; }
+  vossR[i] = Math.random();
+  let v = 0;
+  vossR.forEach(r => { v += r; });
+  v /= 5;
+  const kk = ksKey();
+  const idx = Math.max(0, Math.min(13, Math.floor(v * 14)));
+  const f = 110 * Math.pow(2,
+    (kk.root + kk.scale[idx % 7]) / 12 + Math.floor(idx / 7));
+  triNote(t, f, 0.13, 0.5);
+  return SCHED.step * 2;
 }
 
-let reichT = null;
-const reichA = [0, 0];
-function reichClick(fr, gain) {
-  if (!ac || !audioOn) return;
-  try {
-    const o = ac.createOscillator();
-    o.type = "square";
-    o.frequency.value = fr;
-    const gn = ac.createGain();
-    gn.gain.setValueAtTime(gain, ac.currentTime);
-    gn.gain.exponentialRampToValueAtTime(0.0002, ac.currentTime + 0.05);
-    o.connect(gn);
-    gn.connect(ac.destination);
-    o.start();
-    o.stop(ac.currentTime + 0.06);
-  } catch (e) {}
+function reichPat() {
+  const R = reichPat;
+  if (!R.pat || Date.now() - (R.t || 0) > 120000) {
+    const idx = hedge.map((w, i) => [w, i]).sort((a, b) => b[0] - a[0]);
+    const m1 = idx[0] ? idx[0][1] : 0, m2 = idx[1] ? idx[1][1] : 1;
+    const L = 8 + (m1 % 6);
+    const kR = 2 + (m2 % 3);
+    const pat = [];
+    for (let i = 0; i < L; i++) pat.push(((i * kR) % L) < kR ? 1 : 0);
+    R.pat = pat;
+    const w1 = hedge[m1] || 1, w2 = hedge[m2] || 1;
+    R.eps = 0.03 + 0.05 * Math.max(0, 1 - w2 / (w1 || 1));
+    R.t = Date.now();
+  }
+  return R;
 }
-function reichLoop() {
-  if (reichT) { clearTimeout(reichT); reichT = null; }
-  if (!audioOn || !ac) return;
-  try {
-    if (!reichLoop.pat || Date.now() - (reichLoop.t || 0) > 120000) {
-      const idx = hedge.map((w, i) => [w, i]).sort((a, b) => b[0] - a[0]);
-      const m1 = idx[0] ? idx[0][1] : 0, m2 = idx[1] ? idx[1][1] : 1;
-      const L = 8 + (m1 % 6);
-      const kR = 2 + (m2 % 3);
-      const pat = [];
-      for (let i = 0; i < L; i++) pat.push(((i * kR) % L) < kR ? 1 : 0);
-      reichLoop.pat = pat;
-      const w1 = hedge[m1] || 1, w2 = hedge[m2] || 1;
-      reichLoop.eps = 0.03 + 0.05 * Math.max(0, 1 - w2 / (w1 || 1));
-      reichLoop.t = Date.now();
-    }
-    const L = reichLoop.pat.length;
-    reichA[0] += 1;
-    reichA[1] += 1 + reichLoop.eps;
-    for (let v = 0; v < 2; v++) {
-      while (reichA[v] >= 1) {
-        reichA[v] -= 1;
-        const stp = (reichLoop["s" + v] = ((reichLoop["s" + v] || 0) + 1) % L);
-        if (reichLoop.pat[stp]) reichClick(v ? 660 : 590, 0.004);
-      }
-    }
-  } catch (e) {}
-  reichT = setTimeout(reichLoop, 150);
+function mkReich(v) {
+  // two pulse voices, one running 1+eps faster: sample-accurate phasing
+  let s = 0;
+  return t => {
+    const rp = reichPat(), L = rp.pat.length;
+    s = (s + 1) % L;
+    if (rp.pat[s])
+      pulseHit(t, v ? 330 : 295, v ? "d25" : "d12", 0.16, 0.05,
+               v ? 0.3 : -0.3);
+    return SCHED.step / 2 / (v ? 1 + rp.eps : 1);
+  };
 }
 
 let shepOsc = null, shepG = null, shepT = null;
@@ -10522,7 +10645,7 @@ function shepInit() {
       const g = ac.createGain();
       g.gain.value = 0;
       o.connect(g);
-      g.connect(ac.destination);
+      g.connect(mixBus.bed);
       o.start();
       shepOsc.push(o);
       shepG.push(g);
@@ -10565,11 +10688,12 @@ function shepLoop() {
   shepT = setTimeout(shepLoop, 250);
 }
 
-function ksPluck(freq, gain, pan) {
-  if (!ac || !audioOn || !(freq > 20) || !(gain > 0)) return;
+function ksPluck(when, freq, vel, pan) {
+  if (!ac || !mixBus || !(freq > 20) || !(vel > 0)) return;
   try {
+    const f2 = nesQ(freq);
     const sr = ac.sampleRate;
-    const N = Math.max(2, Math.round(sr / freq));
+    const N = Math.max(2, Math.round(sr / f2));
     const len = Math.min(Math.floor(sr * 1.1), N * 400);
     const buf = ac.createBuffer(1, len, sr);
     const ch = buf.getChannelData(0);
@@ -10579,18 +10703,12 @@ function ksPluck(freq, gain, pan) {
     const src = ac.createBufferSource();
     src.buffer = buf;
     const gn = ac.createGain();
-    gn.gain.value = gain;
+    gn.gain.setValueAtTime(0, when);
+    gn.gain.linearRampToValueAtTime(vel, when + 0.004);
     src.connect(gn);
-    let outN = gn;
-    if (pan !== undefined && pan !== null && ac.createStereoPanner) {
-      const pn = ac.createStereoPanner();
-      pn.pan.value = Math.max(-1, Math.min(1, pan));
-      gn.connect(pn);
-      outN = pn;
-    }
-    outN.connect(ac.destination);
-    src.start();
-    src.stop(ac.currentTime + len / sr);
+    panNode(gn, pan).connect(mixBus.pluck);
+    src.start(when);
+    src.stop(when + len / sr);
   } catch (e) {}
 }
 
@@ -10609,46 +10727,44 @@ function panOf(g) {
   } catch (e) { return 0; }
 }
 
-let tonT = null;
-function tonnetzLoop() {
-  if (tonT) { clearTimeout(tonT); tonT = null; }
-  if (!ac || !audioOn) return;
+function tonnetzFn(t) {
+  const T = tonnetzFn;
+  if (!T.st) {
+    const kk = ksKey();
+    T.st = { r: kk.root, maj: kk.maj };
+  }
+  const st = T.st;
+  let tf;
   try {
-    if (!tonnetzLoop.st) {
-      const kk = ksKey();
-      tonnetzLoop.st = { r: kk.root, maj: kk.maj };
-    }
-    const st = tonnetzLoop.st;
-    let tf;
-    try {
-      const co = communities();
-      const pg = predictNext();
-      if (co && co.k > 1 && pg && last &&
-          co.lab[pg] !== undefined && co.lab[last] !== undefined) {
-        const d = Math.abs(co.lab[pg] - co.lab[last]) % 3;
-        tf = d;
-      } else tf = Math.floor(Math.random() * 3);
-    } catch (e) { tf = Math.floor(Math.random() * 3); }
-    if (tf === 0) st.maj = !st.maj;
-    else if (tf === 1) {
-      if (st.maj) { st.r = (st.r + 4) % 12; st.maj = false; }
-      else { st.r = (st.r + 8) % 12; st.maj = true; }
-    } else {
-      if (st.maj) { st.r = (st.r + 9) % 12; st.maj = false; }
-      else { st.r = (st.r + 3) % 12; st.maj = true; }
-    }
-    let pn = 0;
-    try {
-      const pg2 = predictNext();
-      if (pg2) pn = panOf(pg2);
-    } catch (e) {}
-    const iv = st.maj ? [0, 4, 7] : [0, 3, 7];
-    iv.forEach((sm, i) => {
-      const f = 110 * Math.pow(2, (st.r + sm) / 12);
-      ksPluck(f, 0.0062 - 0.0012 * i, pn + (i - 1) * 0.25);
-    });
+    const co = communities();
+    const pg = predictNext();
+    if (co && co.k > 1 && pg && last &&
+        co.lab[pg] !== undefined && co.lab[last] !== undefined)
+      tf = Math.abs(co.lab[pg] - co.lab[last]) % 3;
+    else tf = Math.floor(Math.random() * 3);
+  } catch (e) { tf = Math.floor(Math.random() * 3); }
+  if (tf === 0) st.maj = !st.maj;
+  else if (tf === 1) {
+    if (st.maj) { st.r = (st.r + 4) % 12; st.maj = false; }
+    else { st.r = (st.r + 8) % 12; st.maj = true; }
+  } else {
+    if (st.maj) { st.r = (st.r + 9) % 12; st.maj = false; }
+    else { st.r = (st.r + 3) % 12; st.maj = true; }
+  }
+  let pn = 0;
+  try {
+    const pg2 = predictNext();
+    if (pg2) pn = panOf(pg2);
   } catch (e) {}
-  tonT = setTimeout(tonnetzLoop, 9000 + Math.floor(Math.random() * 6000));
+  // KS root + chiptune-idiom rapid arpeggio of the triad on pulse 2
+  const iv = st.maj ? [0, 4, 7] : [0, 3, 7];
+  ksPluck(t, 110 * Math.pow(2, st.r / 12), 0.2, pn);
+  for (let i = 0; i < 6; i++)
+    pulseHit(t + 0.03 + i * 0.045,
+             220 * Math.pow(2, (st.r + iv[i % 3]) / 12),
+             "d25", 0.22 * Math.pow(0.85, i), 0.07,
+             pn + ((i % 3) - 1) * 0.2);
+  return 9 + Math.random() * 6;
 }
 
 let binOsc = null, binG = null, binT = null;
@@ -10667,7 +10783,7 @@ function binInit() {
       p.pan.value = pr[0];
       o.connect(g);
       g.connect(p);
-      p.connect(ac.destination);
+      p.connect(mixBus.bed);
       o.start();
       binOsc.push(o);
       binG.push(g);
@@ -10701,18 +10817,21 @@ function audioInit() {
   try {
     ac = new (window.AudioContext || window.webkitAudioContext)();
     if (ac.state === "suspended") ac.resume();
+    mixInit();
+    apuInit();
   } catch (e) { ac = false; return; }
-  geigerLoop();
+  schedAdd("geiger", geigerFn);
+  schedAdd("euclid", euclidFn);
+  schedAdd("reich0", mkReich(0));
+  schedAdd("reich1", mkReich(1));
+  schedAdd("risset", rissetFn);
+  schedAdd("voss", vossFn);
+  schedAdd("tonnetz", tonnetzFn);
   droneInit();
-  euclidLoop();
   shepInit();
-  risLoop();
-  vossLoop();
-  reichLoop();
-  tonnetzLoop();
   binInit();
+  schedLoop();
 }
-document.addEventListener("mousedown", audioInit);
 
 const IDLE_KINDS = ["ca", "life", "ant", "pile", "fern", "rd", "dla", "cca",
                     "bif", "lorenz", "dragon", "wator", "ulam", "phys", "boids",
@@ -15262,6 +15381,7 @@ function syncStop() {
     }
     if (syncMode.rc) { try { syncMode.rc.close(); } catch (e) {} }
   }
+  try { duckMaster(false); } catch (e) {}
   syncMode = null;
   try { render(); } catch (e) {}
 }
@@ -15474,12 +15594,15 @@ function fskTxTick() {
     src.connect(gn);
     gn.connect(ac.destination);
     src.onended = () => {
+      duckMaster(false);
       if (syncMode && syncMode.tx)
         syncMode.aT = setTimeout(fskTxTick, 150);
     };
     syncMode.aSrc = src;
+    duckMaster(true);
     src.start();
   } catch (e) {
+    duckMaster(false);
     if (syncMode && syncMode.tx)
       syncMode.aT = setTimeout(fskTxTick, 1200);
   }
@@ -15606,7 +15729,6 @@ setInterval(() => {
 
 document.addEventListener("keydown", e => {
   if (!booted) return;
-  audioInit();
 
   if (syncMode) {
     if (e.key === ";" || e.key === ":" || e.key === "Escape") syncStop();
@@ -15751,11 +15873,16 @@ document.addEventListener("keydown", e => {
     render();
   }
   else if (e.key === "'") {
-    audioOn = !audioOn;
-    localStorage.setItem("aud", audioOn ? "1" : "0");
-    if (audioOn && ac === null) audioInit();
-    else { geigerLoop(); droneUpdate(); euclidLoop(); shepLoop(); risLoop();
-           vossLoop(); reichLoop(); tonnetzLoop(); binLoop(); }
+    if (ac === null) {
+      // sole entry point: keydown is a user gesture, so the context starts
+      audioOn = true;
+      localStorage.setItem("aud", "1");
+      audioInit();
+    } else {
+      audioOn = !audioOn;
+      localStorage.setItem("aud", audioOn ? "1" : "0");
+      schedLoop(); droneUpdate(); shepLoop(); binLoop();
+    }
   }
   else if (e.key.length === 1 && /[a-z0-9 \-_.]/i.test(e.key)) {
     if (pendingFix && pendingFix !== e.key &&
