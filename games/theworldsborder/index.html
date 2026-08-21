@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THE WORLD'S BORDER</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+  #screen {
+    position: absolute; inset: 0; margin: auto;
+    width: 100vw; height: 56.25vw; max-height: 100vh; max-width: 177.78vh;
+    image-rendering: pixelated;
+    cursor: crosshair;
+  }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<script src="game.js"></script>
+<script>
+Module.onRuntimeInitialized = () => {
+  const W = Module._fb_width(), H = Module._fb_height();
+  const canvas = document.getElementById('screen');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const fbPtr = Module._get_framebuffer();
+
+  // --- input ---
+  const KEYMAP = { KeyW:0, KeyA:1, KeyS:2, KeyD:3, Space:4, ShiftLeft:5, Escape:6, Enter:7,
+                   ArrowUp:0, ArrowLeft:1, ArrowDown:2, ArrowRight:3, KeyR:8, KeyM:9 };
+  addEventListener('keydown', e => {
+    if (e.code in KEYMAP) { Module._key_event(KEYMAP[e.code], 1); if (e.code === 'Space') e.preventDefault(); }
+  });
+  addEventListener('keyup', e => { if (e.code in KEYMAP) Module._key_event(KEYMAP[e.code], 0); });
+  canvas.addEventListener('click', () => { canvas.requestPointerLock(); startAudio(); });
+  document.addEventListener('pointerlockchange', () =>
+    Module._set_pointer_lock(document.pointerLockElement === canvas ? 1 : 0));
+  addEventListener('mousemove', e => {
+    if (document.pointerLockElement === canvas) Module._mouse_move(e.movementX, e.movementY);
+  });
+  addEventListener('mousedown', e => Module._mouse_button(e.button, 1));
+  addEventListener('mouseup', e => Module._mouse_button(e.button, 0));
+
+  // --- audio ---
+  let audioCtx = null;
+  function startAudio() {
+    if (audioCtx) { audioCtx.resume(); return; }
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 22050 });
+    const node = audioCtx.createScriptProcessor(1024, 0, 1);
+    node.onaudioprocess = ev => {
+      const out = ev.outputBuffer.getChannelData(0);
+      const ptr = Module._audio_render(out.length);
+      out.set(Module.HEAPF32.subarray(ptr >> 2, (ptr >> 2) + out.length));
+    };
+    node.connect(audioCtx.destination);
+    Module._set_audio_latency(audioCtx.outputLatency || audioCtx.baseLatency || 0.06);
+    Module._audio_started();
+  }
+
+  // --- debug: ?stage=N jumps straight into a stage (tooling / QA) ---
+  const dbgStage = new URLSearchParams(location.search).get('stage');
+  if (dbgStage !== null) Module._debug_start_stage(+dbgStage - 1);
+
+  // --- main loop ---
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    Module._frame(dt);
+    img.data.set(Module.HEAPU8.subarray(fbPtr, fbPtr + W * H * 4));
+    ctx.putImageData(img, 0, 0);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+};
+</script>
+</body>
+</html>
