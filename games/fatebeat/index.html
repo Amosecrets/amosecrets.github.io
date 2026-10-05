@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#2b46d6">
+<title>命运节拍 FATEBEAT</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: linear-gradient(135deg, #7fe9d6, #fbf7a8 50%, #ff8fb8); }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; outline: none; }
+  #note { position: fixed; left: 0; right: 0; top: 45%; text-align: center; font: 700 22px system-ui, sans-serif; color: #2b46d6; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="note">Loading… 加载中</div>
+<script src="fonts.js"></script>
+<script src="game_wasm.js"></script>
+<script src="music.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
