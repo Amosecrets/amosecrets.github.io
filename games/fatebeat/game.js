@@ -20,6 +20,8 @@
   var ALIGN = ['left', 'center', 'right'];
   var BASELINE = ['alphabetic', 'middle', 'top'];
   function createGame(opts) {
+    var liteEx = null;
+    function liteFx() { return liteEx !== null && liteEx.stat(12) > 0; }
     var canvas = opts.canvas;
     var main = canvas.getContext('2d');
     var ctx = main;
@@ -143,10 +145,10 @@
         c.drawImage(canvas, 0, 0);
       },
       cv_font_family: function (f) { if (f !== fontFam) { fontFam = (f >= 0 && f < FONT_STACKS.length) ? f : 0; lastFont = ''; } },
-      cv_filter: function (p, n) { ctx.filter = str(p, n); },
+      cv_filter: function (p, n) { ctx.filter = ctx === main && liteFx() ? 'none' : str(p, n); },
       cv_smoothing: function (on) { ctx.imageSmoothingEnabled = !!on; },
       cv_shadow: function (c, blur, ox, oy) {
-        if ((c & 255) === 0) { ctx.shadowColor = 'rgba(0,0,0,0)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; return; }
+        if ((c & 255) === 0 || (ctx === main && liteFx())) { ctx.shadowColor = 'rgba(0,0,0,0)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; return; }
         ctx.shadowColor = css(c); ctx.shadowBlur = blur * base[0]; ctx.shadowOffsetX = ox * base[0]; ctx.shadowOffsetY = oy * base[0];
       },
       cv_dash: function (on, off) { ctx.setLineDash(on > 0 ? [on, off] : []); },
@@ -196,6 +198,7 @@
     };
     return WebAssembly.instantiate(opts.wasmBytes, { env: env }).then(function (res) {
       var ex = res.instance.exports;
+      liteEx = ex;
       memory = ex.memory;
       if (ex._initialize) ex._initialize();
       ex.init();
@@ -305,8 +308,13 @@
     var canvas = document.getElementById('game');
     var note = document.getElementById('note');
     function fail(msg) { if (note) { note.style.display = 'block'; note.textContent = msg; } }
+    var liteRes = 0;
     function resize() {
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (liteRes) {
+        var mp = window.innerWidth * window.innerHeight * dpr * dpr, cap = liteRes === 2 ? 2.1e6 : 0.9e6;
+        if (mp > cap) dpr *= Math.sqrt(cap / mp);
+      }
       var w = Math.max(320, Math.floor(window.innerWidth * dpr)), h = Math.max(180, Math.floor(window.innerHeight * dpr));
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     }
@@ -417,6 +425,7 @@
       if (dbg) window.__fb = function () { return 'gstate=' + ex.stat(0) + ' gt=' + ex.stat(9) + 'ms combo=' + ex.stat(10); };
       var lastTick = 0, lastAt = -1, atSame = 0, lastHeapAt = 0;
       function tick(now) {
+        liteRes = ex.stat(12);
         resize();
         var t0 = performance.now();
         ex.frame(t0, canvas.width, canvas.height);
