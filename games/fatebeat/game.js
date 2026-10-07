@@ -302,9 +302,11 @@
         else if (ct >= 0.5 && now - ctAt >= 500) {
           freeRun = 1;
           ctOut = ct + (now - ctAt) / 1000;
-          var msg = 'music clock stuck at ' + ct.toFixed(2) + 's (length ' + (music.duration || 0).toFixed(2) + 's' + (music.ended ? ', ended' : '') + '), kept going on a timer';
-          diag(msg);
-          if (onNote) onNote(msg);
+          if (!music.ended) {
+            var msg = 'music clock stuck at ' + ct.toFixed(2) + 's (length ' + (music.duration || 0).toFixed(2) + 's), kept going on a timer';
+            diag(msg);
+            if (onNote) onNote(msg);
+          }
           return ctOut;
         }
         return (ctOut = ct);
