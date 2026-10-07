@@ -1,17 +1,23 @@
+/* Host glue for game.wasm: canvas 2D, audio, input, storage.
+   All game logic and drawing decisions live in the C code (src/). */
 (function (root) {
   'use strict';
+
+  /* embedded fallbacks first (tools/make_fonts.py fills them with every character a stack lacks):
+     a glyph that falls through to the system fonts can freeze a frame while the browser loads them */
   var CJK_FALLBACK = '"FB Symbols","FB CJK","PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+  /* must match FONT_* in src/stage.h */
   var FONT_STACKS = [
-    '"Fredoka","ZCOOL KuaiLe",',
-    '"Fusion Pixel",',
-    '"Cormorant Garamond","ZCOOL XiaoWei",',
-    '"Permanent Marker","Zhi Mang Xing",',
-    '"Patrick Hand","Long Cang",',
-    '"Share Tech Mono","Fusion Pixel",',
-    '"Orbitron","ZCOOL QingKe HuangYou",',
-    '"Bungee","ZCOOL QingKe HuangYou",',
-    '"Creepster","Zhi Mang Xing",',
-    '"Josefin Sans","ZCOOL XiaoWei",'
+    '"Fredoka","ZCOOL KuaiLe",',                 /* POP */
+    '"Fusion Pixel",',                           /* PIXEL */
+    '"Cormorant Garamond","ZCOOL XiaoWei",',     /* SERIF */
+    '"Permanent Marker","Zhi Mang Xing",',       /* BRUSH */
+    '"Patrick Hand","Long Cang",',               /* HAND */
+    '"Share Tech Mono","Fusion Pixel",',         /* MONO */
+    '"Orbitron","ZCOOL QingKe HuangYou",',       /* TECH */
+    '"Bungee","ZCOOL QingKe HuangYou",',         /* HEAVY */
+    '"Creepster","Zhi Mang Xing",',              /* HORROR */
+    '"Josefin Sans","ZCOOL XiaoWei",'            /* THIN */
   ].map(function (f) { return f + CJK_FALLBACK; });
   var BLEND = ['source-over', 'lighter', 'multiply', 'screen', 'overlay', 'difference', 'destination-out', 'source-atop',
     'color-dodge', 'hard-light', 'soft-light', 'color', 'luminosity', 'hue'];
@@ -19,7 +25,10 @@
   var JOINS = ['miter', 'round', 'bevel'];
   var ALIGN = ['left', 'center', 'right'];
   var BASELINE = ['alphabetic', 'middle', 'top'];
+
+  /* opts: canvas, wasmBytes, createCanvas(w,h), audio (see makeBrowserAudio), storage {load(), save(str)} */
   function createGame(opts) {
+    /* PERF MODE: live shadow blurs / CSS filters drawn straight to the screen are skipped (cached layers keep theirs) */
     var liteEx = null;
     function liteFx() { return liteEx !== null && liteEx.stat(12) > 0; }
     var canvas = opts.canvas;
@@ -36,6 +45,10 @@
     var images = {};
     var imgBase = opts.assetBase || '';
     var scratch = null;
+
+    /* layer canvases: sizes rounded up so small size changes reuse the canvas, and a
+       replaced canvas is emptied at once, because iOS Safari frees canvas memory late
+       and stops handing out canvases once its limit is reached */
     function makeLayer(old, w, h) {
       if (old) { old.width = 0; old.height = 0; }
       return opts.createCanvas(Math.ceil(w / 64) * 64, Math.ceil(h / 64) * 64);
@@ -43,10 +56,12 @@
     function ctxOf(L) {
       var c = L.getContext('2d');
       if (c) return c;
+      /* no memory left for this canvas: draw into a throwaway one instead of crashing */
       if (opts.onError) opts.onError(new Error('canvas memory full'));
       if (!scratch) scratch = opts.createCanvas(1, 1).getContext('2d');
       return scratch;
     }
+
     function views() {
       if (!u8 || u8.buffer !== memory.buffer) {
         u8 = new Uint8Array(memory.buffer);
@@ -73,6 +88,7 @@
       for (var i = 0; i < n; i++) g.addColorStop(Math.min(1, Math.max(0, f32[(ps >> 2) + i])), css(u32[(pc >> 2) + i]));
       return g;
     }
+
     var env = {
       cv_save: function () { ctx.save(); },
       cv_restore: function () { ctx.restore(); lastFont = ''; },
@@ -127,6 +143,8 @@
         var s = base[0];
         var pw = Math.max(1, Math.ceil(w * s)), ph = Math.max(1, Math.ceil(h * s));
         var L = layers[id];
+        /* layers only grow: re-allocating a canvas whenever a stage changes a layer's
+           size costs the browser a stall; the used part is (uw, uh) */
         if (!L || L.width < pw || L.height < ph) L = layers[id] = makeLayer(L, Math.max(pw, L ? L.width : 0), Math.max(ph, L ? L.height : 0));
         L.uw = pw; L.uh = ph;
         ctx = ctxOf(L);
@@ -180,6 +198,7 @@
         if (sw <= 0 || sh <= 0) ctx.drawImage(im.img, dx, dy, dw, dh);
         else ctx.drawImage(im.img, sx, sy, sw, sh, dx, dy, dw, dh);
       },
+
       au_load: function (i) { audio.load(i); },
       au_state: function () { return audio.state(); },
       au_play: function (from) { audio.play(from); },
@@ -189,6 +208,7 @@
       au_volume: function (v) { audio.volume(v); },
       au_sfx_define: function (id, p, n, rate) { views(); audio.sfxDefine(id, f32.slice(p >> 2, (p >> 2) + n), rate); },
       au_sfx_play: function (id, vol, rate) { audio.sfxPlay(id, vol, rate); },
+
       st_load: function (p, max) {
         var s = opts.storage.load();
         if (!s) return 0;
@@ -208,12 +228,15 @@
       },
       js_log: function (p, n) { console.log(str(p, n)); }
     };
+
     return WebAssembly.instantiate(opts.wasmBytes, { env: env }).then(function (res) {
       var ex = res.instance.exports;
       liteEx = ex;
       memory = ex.memory;
       if (ex._initialize) ex._initialize();
       ex.init();
+      /* a frame that throws (a canvas error, a trap) must not stop the game: put the
+         C stack and the canvas state back and carry on with the next frame */
       var api = {};
       for (var k in ex) api[k] = ex[k];
       api.frame = function (t, w, h) {
@@ -229,9 +252,14 @@
       return api;
     });
   }
+
+  /* ---- browser audio: <audio> for music (works from file://), WebAudio for effects ---- */
   function makeBrowserAudio(onNote) {
     var music = new Audio();
     var state = 0, song = -1, loadAt = 0;
+    /* the song clock: iOS Safari can stop moving currentTime near the end of an .ogg while the
+       music keeps playing (and an ended song stops it for good), which froze the notes; when it
+       sits still for half a second while the music should be playing, keep counting on a timer */
     var ctLast = -1, ctAt = 0, ctNow = 0, ctOut = 0, freeRun = 0;
     function clockReset() { ctLast = -1; ctAt = ctNow = performance.now(); freeRun = 0; }
     var actx = null, sfx = {};
@@ -239,6 +267,8 @@
     function ready() { if (state === 1) state = 2; }
     music.addEventListener('canplay', ready);
     music.addEventListener('canplaythrough', ready);
+    /* songs: music/NN.ogg if present, else the online copy from music.js, downloaded
+       whole into memory first so playback can never stall waiting for the network */
     var remote = null, onLocal = 0, blobs = {}, blobOrder = [], fetchGen = 0;
     function setSrc(url, local) { onLocal = local; music.src = url; music.load(); }
     function fetchRemote(i) {
@@ -255,6 +285,7 @@
       if (state !== 1) return;
       if (onLocal && remote) { onLocal = 0; fetchRemote(song); } else state = 3;
     });
+    /* diagnostics: audio buffering stalls (read with window.__fbDiag) */
     ['waiting', 'stalled'].forEach(function (ev) {
       music.addEventListener(ev, function () { diag(ev + ' @' + music.currentTime.toFixed(2)); });
     });
@@ -266,6 +297,7 @@
       if (actx && actx.state === 'suspended') actx.resume();
     }
     window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('touchend', unlock, true);
     window.addEventListener('keydown', unlock, true);
     function playSafe() { var p = music.play(); if (p && p.catch) p.catch(function () {}); }
     return {
@@ -278,9 +310,10 @@
         var nn = (i + 1 < 10 ? '0' : '') + (i + 1);
         remote = (root.FATEBEAT_MUSIC || {})[nn] || null;
         if (blobs[i]) { setSrc(blobs[i], 0); return; }
-        setSrc('music/' + nn + '.ogg', 1);
+        setSrc('music/' + nn + '.ogg', 1); /* the local copy first; online copy if it is missing */
       },
       state: function () {
+        /* don't depend on 'canplay' alone: some browsers stop at metadata until play() */
         if (state === 1 && !(remote && !onLocal && !blobs[song]) && (music.readyState >= 3 || (music.readyState >= 1 && performance.now() - loadAt > 1200))) state = 2;
         return state;
       },
@@ -302,7 +335,7 @@
         else if (ct >= 0.5 && now - ctAt >= 500) {
           freeRun = 1;
           ctOut = ct + (now - ctAt) / 1000;
-          if (!music.ended) {
+          if (!music.ended) { /* the music simply ending is normal */
             var msg = 'music clock stuck at ' + ct.toFixed(2) + 's (length ' + (music.duration || 0).toFixed(2) + 's), kept going on a timer';
             diag(msg);
             if (onNote) onNote(msg);
@@ -331,14 +364,16 @@
       }
     };
   }
+
   var KEYS = {
     KeyD: 1, KeyF: 2, KeyJ: 3, KeyK: 4,
     ArrowUp: 10, ArrowDown: 11, ArrowLeft: 12, ArrowRight: 13, KeyW: 10, KeyS: 11, KeyA: 12,
     Enter: 14, NumpadEnter: 14, Escape: 15, Space: 16, Tab: 17, KeyR: 20, KeyO: 21, KeyP: 15, Backspace: 15
   };
+
   var diagLog = [];
   var lastHeap = 0;
-  function heap() {
+  function heap() { /* Chromium only: JS heap now, and its change since the last check (a big drop = garbage collection) */
     var m = typeof performance !== 'undefined' && performance.memory;
     if (!m) return '';
     var h = m.usedJSHeapSize / 1048576, d = h - lastHeap;
@@ -347,15 +382,18 @@
   }
   function diag(msg) { if (diagLog.length >= 200) diagLog.shift(); diagLog.push((performance.now() / 1000).toFixed(2) + 's ' + msg); }
   if (typeof window !== 'undefined') window.__fbDiag = function () { return diagLog.join('\n'); };
+
   function b64bytes(b64) {
     var bin = atob(b64), out = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
   }
+
   function boot() {
     var canvas = document.getElementById('game');
     var note = document.getElementById('note');
     function fail(msg) { if (note) { note.style.display = 'block'; note.textContent = msg; } }
+    /* errors the game recovered from: logged, and shown for a few seconds so phone players can report them */
     var errBox = null, errHide = 0, errLast = '';
     function showError(e) {
       var msg = (e && e.message ? e.message : String(e));
@@ -371,7 +409,8 @@
       clearTimeout(errHide);
       errHide = setTimeout(function () { errBox.style.display = 'none'; }, 8000);
     }
-    var liteRes = 0;
+
+    var liteRes = 0; /* PERF MODE: the song renders with at most ~0.9 MP on phones, ~2.1 MP on desktop */
     function resize() {
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
       if (liteRes) {
@@ -383,6 +422,7 @@
     }
     window.addEventListener('resize', resize);
     resize();
+
     var audioDev = null;
     var fonts = [];
     if (window.FontFace && document.fonts && root.FATEBEAT_FONTS) {
@@ -399,11 +439,14 @@
     };
     var wasm = root.GAME_WASM_B64 ? Promise.resolve(b64bytes(root.GAME_WASM_B64))
       : fetch('game.wasm').then(function (r) { return r.arrayBuffer(); });
+
     Promise.all([wasm, Promise.all(fonts)]).then(function (r) {
       return createGame({
         canvas: canvas,
         wasmBytes: r[0],
         createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+        /* decode off the main thread before the game may draw it: a first draw of an
+           undecoded image decodes synchronously and can freeze a frame */
         loadImage: function (src, ok, fail) {
           var im = new Image();
           im.onload = function () { if (im.decode) im.decode().then(function () { ok(im); }, function () { ok(im); }); else ok(im); };
@@ -416,11 +459,13 @@
       });
     }).then(function (ex) {
       if (note) note.style.display = 'none';
+      /* phones (touch only, no mouse): portrait mode with the Iridiumol songs; ?mobile=1 / ?mobile=0 forces it */
       var mq = function (s) { return !!(window.matchMedia && window.matchMedia(s).matches); };
       var mq0 = new URLSearchParams(location.search).get('mobile');
       var phone = mq0 !== null ? mq0 === '1' : (mq('(pointer: coarse)') && !mq('(any-pointer: fine)'));
       if (ex.set_mobile) ex.set_mobile(phone ? 1 : 0);
       var dprOf = function () { return canvas.width / canvas.getBoundingClientRect().width; };
+
       window.addEventListener('keydown', function (e) {
         if (e.code === 'F8') {
           e.preventDefault();
@@ -460,8 +505,12 @@
         if (release) delete slots[e.pointerId];
         return s;
       }
+      /* fingers go through touch events: iOS Safari drops or delays pointerdown for a second
+         finger while another one is held still, touch events with preventDefault always arrive */
+      var hasTouch = 'ontouchstart' in window;
       function ptr(phase) {
         return function (e) {
+          if (hasTouch && e.pointerType === 'touch') return;
           var r = canvas.getBoundingClientRect(), d = dprOf();
           e.preventDefault();
           if (phase === 0 && canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) {} }
@@ -472,6 +521,23 @@
       canvas.addEventListener('pointermove', ptr(1));
       canvas.addEventListener('pointerup', ptr(2));
       canvas.addEventListener('pointercancel', ptr(2));
+      function tch(phase) {
+        return function (e) {
+          e.preventDefault();
+          var r = canvas.getBoundingClientRect(), d = dprOf(), t = e.timeStamp || performance.now();
+          for (var i = 0; i < e.changedTouches.length; i++) {
+            var c = e.changedTouches[i];
+            ex.pointer(slot({ pointerId: 'f' + c.identifier }, phase === 2), phase, (c.clientX - r.left) * d, (c.clientY - r.top) * d, t);
+          }
+        };
+      }
+      if (hasTouch) {
+        var topt = { passive: false };
+        canvas.addEventListener('touchstart', tch(0), topt);
+        canvas.addEventListener('touchmove', tch(1), topt);
+        canvas.addEventListener('touchend', tch(2), topt);
+        canvas.addEventListener('touchcancel', tch(2), topt);
+      }
       canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
       var wheelAt = 0;
       window.addEventListener('wheel', function (e) {
@@ -482,15 +548,18 @@
       }, { passive: true });
       document.addEventListener('visibilitychange', function () { if (document.hidden) ex.blur(); });
       window.addEventListener('blur', function () { ex.blur(); });
+
+      /* ?debug=<what>&song=&diff=&at=  (test hook) */
       var q = new URLSearchParams(location.search);
       if (q.has('debug')) ex.debug(+q.get('debug'), +(q.get('song') || 0), +(q.get('diff') || 0), +(q.get('at') || 0));
+
       var dbg = q.get('debug') === '6' ? note : null;
       if (dbg) { dbg.style.display = 'block'; dbg.style.top = '2px'; dbg.style.fontSize = '13px'; }
       if (dbg) window.__fb = function () { return 'gstate=' + ex.stat(0) + ' gt=' + ex.stat(9) + 'ms combo=' + ex.stat(10); };
       var lastTick = 0, lastAt = -1, atSame = 0, lastHeapAt = 0;
       function tick(now) {
-        requestAnimationFrame(tick);
-        liteRes = ex.stat(12);
+        requestAnimationFrame(tick); /* first, so nothing below can stop the loop */
+        liteRes = ex.stat(12); /* 0 off, 1 phone, 2 desktop */
         resize();
         var t0 = performance.now();
         ex.frame(t0, canvas.width, canvas.height);
@@ -515,6 +584,7 @@
       fail('Could not start the game: ' + (e && e.message ? e.message : e));
     });
   }
+
   root.FateBeat = { createGame: createGame };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.FateBeat;
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
