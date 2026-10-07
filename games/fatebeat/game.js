@@ -229,9 +229,11 @@
       return api;
     });
   }
-  function makeBrowserAudio() {
+  function makeBrowserAudio(onNote) {
     var music = new Audio();
     var state = 0, song = -1, loadAt = 0;
+    var ctLast = -1, ctAt = 0, ctNow = 0, ctOut = 0, freeRun = 0;
+    function clockReset() { ctLast = -1; ctAt = ctNow = performance.now(); freeRun = 0; }
     var actx = null, sfx = {};
     music.preload = 'auto';
     function ready() { if (state === 1) state = 2; }
@@ -282,11 +284,31 @@
         if (state === 1 && !(remote && !onLocal && !blobs[song]) && (music.readyState >= 3 || (music.readyState >= 1 && performance.now() - loadAt > 1200))) state = 2;
         return state;
       },
-      play: function (from) { try { music.currentTime = Math.max(0, from); } catch (e) {} playSafe(); },
+      play: function (from) { try { music.currentTime = Math.max(0, from); } catch (e) {} clockReset(); playSafe(); },
       pause: function () { music.pause(); },
-      paused: function () { return music.paused; },
+      paused: function () { return music.paused && !music.ended; },
       resume: function () { playSafe(); },
-      time: function () { return music.currentTime; },
+      time: function () {
+        var ct = music.currentTime, now = performance.now(), dt = (now - ctNow) / 1000;
+        var playing = !music.paused || music.ended;
+        ctNow = now;
+        if (ct !== ctLast) {
+          ctLast = ct; ctAt = now;
+          if (!freeRun) return (ctOut = ct);
+          if (ct >= ctOut - 0.1) { freeRun = 0; diag('music clock moving again @' + ct.toFixed(2)); return (ctOut = ct); }
+        }
+        if (freeRun) { if (playing) ctOut += dt; return ctOut; }
+        if (!playing) ctAt = now;
+        else if (ct >= 0.5 && now - ctAt >= 500) {
+          freeRun = 1;
+          ctOut = ct + (now - ctAt) / 1000;
+          var msg = 'music clock stuck at ' + ct.toFixed(2) + 's (length ' + (music.duration || 0).toFixed(2) + 's' + (music.ended ? ', ended' : '') + '), kept going on a timer';
+          diag(msg);
+          if (onNote) onNote(msg);
+          return ctOut;
+        }
+        return (ctOut = ct);
+      },
       info: function () { return 'state=' + state + ' ready=' + music.readyState + ' paused=' + music.paused + ' t=' + music.currentTime.toFixed(2) + (music.error ? ' err=' + music.error.code : ''); },
       volume: function (v) { music.volume = Math.max(0, Math.min(1, v)); },
       sfxDefine: function (id, samples, rate) { sfx[id] = { samples: samples, rate: rate, buf: null }; },
@@ -342,7 +364,7 @@
           'font:12px monospace;z-index:9;pointer-events:none;word-break:break-all';
         document.body.appendChild(errBox);
       }
-      errBox.textContent = 'FateBeat error (recovered): ' + msg;
+      errBox.textContent = 'FateBeat (recovered): ' + msg;
       errBox.style.display = 'block';
       clearTimeout(errHide);
       errHide = setTimeout(function () { errBox.style.display = 'none'; }, 8000);
@@ -386,7 +408,7 @@
           im.onerror = fail;
           im.src = src;
         },
-        audio: (audioDev = makeBrowserAudio()),
+        audio: (audioDev = makeBrowserAudio(function (m) { showError(new Error(m)); })),
         storage: storage,
         onError: showError
       });
