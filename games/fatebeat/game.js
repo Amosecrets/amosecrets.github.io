@@ -35,6 +35,18 @@
     var fontFam = 0;
     var images = {};
     var imgBase = opts.assetBase || '';
+    var scratch = null;
+    function makeLayer(old, w, h) {
+      if (old) { old.width = 0; old.height = 0; }
+      return opts.createCanvas(Math.ceil(w / 64) * 64, Math.ceil(h / 64) * 64);
+    }
+    function ctxOf(L) {
+      var c = L.getContext('2d');
+      if (c) return c;
+      if (opts.onError) opts.onError(new Error('canvas memory full'));
+      if (!scratch) scratch = opts.createCanvas(1, 1).getContext('2d');
+      return scratch;
+    }
     function views() {
       if (!u8 || u8.buffer !== memory.buffer) {
         u8 = new Uint8Array(memory.buffer);
@@ -115,9 +127,9 @@
         var s = base[0];
         var pw = Math.max(1, Math.ceil(w * s)), ph = Math.max(1, Math.ceil(h * s));
         var L = layers[id];
-        if (!L || L.width < pw || L.height < ph) L = layers[id] = opts.createCanvas(Math.max(pw, L ? L.width : 0), Math.max(ph, L ? L.height : 0));
+        if (!L || L.width < pw || L.height < ph) L = layers[id] = makeLayer(L, Math.max(pw, L ? L.width : 0), Math.max(ph, L ? L.height : 0));
         L.uw = pw; L.uh = ph;
-        ctx = L.getContext('2d');
+        ctx = ctxOf(L);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, pw + 1, ph + 1);
         ctx.setTransform(s, 0, 0, s, 0, 0);
@@ -137,9 +149,9 @@
       },
       cv_snapshot: function (id) {
         var L = layers[id];
-        if (!L || L.width < canvas.width || L.height < canvas.height) L = layers[id] = opts.createCanvas(Math.max(canvas.width, L ? L.width : 0), Math.max(canvas.height, L ? L.height : 0));
+        if (!L || L.width < canvas.width || L.height < canvas.height) L = layers[id] = makeLayer(L, Math.max(canvas.width, L ? L.width : 0), Math.max(canvas.height, L ? L.height : 0));
         L.uw = canvas.width; L.uh = canvas.height;
-        var c = L.getContext('2d');
+        var c = ctxOf(L);
         c.setTransform(1, 0, 0, 1, 0, 0);
         c.clearRect(0, 0, L.width, L.height);
         c.drawImage(canvas, 0, 0);
@@ -202,7 +214,19 @@
       memory = ex.memory;
       if (ex._initialize) ex._initialize();
       ex.init();
-      return ex;
+      var api = {};
+      for (var k in ex) api[k] = ex[k];
+      api.frame = function (t, w, h) {
+        var sp = ex.sp_get ? ex.sp_get() : 0;
+        try { ex.frame(t, w, h); } catch (e) {
+          if (ex.sp_set) ex.sp_set(sp);
+          for (var i = 0; i < 64; i++) { ctx.restore(); if (ctx !== main) main.restore(); }
+          ctx = main; lastFont = '';
+          if (!opts.onError) throw e;
+          opts.onError(e);
+        }
+      };
+      return api;
     });
   }
   function makeBrowserAudio() {
@@ -308,6 +332,21 @@
     var canvas = document.getElementById('game');
     var note = document.getElementById('note');
     function fail(msg) { if (note) { note.style.display = 'block'; note.textContent = msg; } }
+    var errBox = null, errHide = 0, errLast = '';
+    function showError(e) {
+      var msg = (e && e.message ? e.message : String(e));
+      if (msg !== errLast) { errLast = msg; diag('error: ' + msg); console.error(e); }
+      if (!errBox) {
+        errBox = document.createElement('div');
+        errBox.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;padding:6px 10px;background:rgba(0,0,0,.75);color:#fff;' +
+          'font:12px monospace;z-index:9;pointer-events:none;word-break:break-all';
+        document.body.appendChild(errBox);
+      }
+      errBox.textContent = 'FateBeat error (recovered): ' + msg;
+      errBox.style.display = 'block';
+      clearTimeout(errHide);
+      errHide = setTimeout(function () { errBox.style.display = 'none'; }, 8000);
+    }
     var liteRes = 0;
     function resize() {
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -348,7 +387,8 @@
           im.src = src;
         },
         audio: (audioDev = makeBrowserAudio()),
-        storage: storage
+        storage: storage,
+        onError: showError
       });
     }).then(function (ex) {
       if (note) note.style.display = 'none';
@@ -425,6 +465,7 @@
       if (dbg) window.__fb = function () { return 'gstate=' + ex.stat(0) + ' gt=' + ex.stat(9) + 'ms combo=' + ex.stat(10); };
       var lastTick = 0, lastAt = -1, atSame = 0, lastHeapAt = 0;
       function tick(now) {
+        requestAnimationFrame(tick);
         liteRes = ex.stat(12);
         resize();
         var t0 = performance.now();
@@ -443,7 +484,6 @@
         }
         lastAt = at;
         if (dbg) dbg.textContent = audioDev.info();
-        requestAnimationFrame(tick);
       }
       requestAnimationFrame(tick);
     }).catch(function (e) {
