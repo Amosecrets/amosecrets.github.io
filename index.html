@@ -9994,8 +9994,6 @@ function trackPt(x, y, gest) {
   const tN = performance.now();
   mmPts.push([x, y, tN]);
   if (mmPts.length > 6) mmPts.shift();
-  // gestures need a held button (or a finger): a bare hover sweep across
-  // the window is not an intent to open Dasher / toggle stats
   if (gest) {
     if (gTrail.length && tN - gTrail[gTrail.length - 1][2] > 300) gTrail = [];
     gTrail.push([x, y, tN]);
@@ -10119,15 +10117,12 @@ document.addEventListener("click", e => {
 let audioOn = localStorage.getItem("aud") !== "0";
 let ac = null, predHn = 0.5, predHt = 0;
 
-// mix console (dB). Trims sized so vel ~0.15-0.5 lands near the old
-// absolute levels once the compressor's ~+11dB makeup is paid by master.
 const MIX = { master: -11, bed: 0, noise: -28, pulse: -31, tri: -29,
               pluck: -30 };
 const dbGain = db => Math.pow(10, db / 20);
 let mixMaster = null, mixBus = null, apu = null;
 
 function mixInit() {
-  // buses -> master -> highshelf -8dB@4k -> compressor -> softclip -> out
   mixMaster = ac.createGain();
   mixMaster.gain.value = dbGain(MIX.master);
   const shelf = ac.createBiquadFilter();
@@ -10172,7 +10167,6 @@ function duckMaster(on) {
 }
 
 function apuInit() {
-  // NES-flavored rack: duty pulses, 4-bit stepped triangle, LFSR noise
   apu = {};
   const pw = duty => {
     const nH = 10;
@@ -10199,7 +10193,6 @@ function apuInit() {
   }
   apu.tri = ac.createPeriodicWave(re, im);
   const lfsr = (short2, rate) => {
-    // 15-bit LFSR, sample-and-hold at `rate` (sub-rate = dark spectrum)
     const sr = ac.sampleRate, len = sr | 0;
     const buf = ac.createBuffer(1, len, sr), ch = buf.getChannelData(0);
     let r = 1, v = 0;
@@ -10220,7 +10213,6 @@ function apuInit() {
 }
 
 function nesQ(f) {
-  // snap to the 2A03 11-bit period table; melodic ceiling ~1.25kHz
   f = Math.min(f, 1250);
   const P = Math.max(8, Math.min(2047, Math.round(1789773 / (16 * f) - 1)));
   return 1789773 / (16 * (P + 1));
@@ -10295,8 +10287,6 @@ function triNote(when, freq, vel, dur) {
   } catch (e) {}
 }
 
-// lookahead scheduler: one clock, events land on ac.currentTime not
-// setTimeout jitter. Layer fn(t) schedules at exact t, returns next dt.
 const SCHED = { look: 0.15, tick: 25, step: 0.32, layers: {}, t: null };
 
 function schedAdd(name, fn) {
@@ -10527,8 +10517,6 @@ function rissetFn(t) {
     risA[i] += 0.1 * 0.9 * Math.pow(2, risP[i]);
     if (risA[i] >= 1) {
       risA[i] -= Math.floor(risA[i]);
-      // bandpass climbs an octave pair with phase: the accelerando
-      // reads in timbre as well as rate
       nzHit(t, apu.nzLo, 0.15 * Math.pow(Math.sin(Math.PI * risP[i]), 2),
             0.022, 500 * Math.pow(2, 2 * risP[i]));
     }
@@ -10610,7 +10598,6 @@ function reichPat() {
   return R;
 }
 function mkReich(v) {
-  // two pulse voices, one running 1+eps faster: sample-accurate phasing
   let s = 0;
   return t => {
     const rp = reichPat(), L = rp.pat.length;
@@ -10755,7 +10742,6 @@ function tonnetzFn(t) {
     const pg2 = predictNext();
     if (pg2) pn = panOf(pg2);
   } catch (e) {}
-  // KS root + chiptune-idiom rapid arpeggio of the triad on pulse 2
   const iv = st.maj ? [0, 4, 7] : [0, 3, 7];
   ksPluck(t, 110 * Math.pow(2, st.r / 12), 0.2, pn);
   for (let i = 0; i < 6; i++)
@@ -15873,7 +15859,6 @@ document.addEventListener("keydown", e => {
   }
   else if (e.key === "'") {
     if (ac === null) {
-      // sole entry point: keydown is a user gesture, so the context starts
       audioOn = true;
       localStorage.setItem("aud", "1");
       audioInit();
