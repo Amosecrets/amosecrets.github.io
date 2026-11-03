@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gravel</title>
+<style>
+  /* ============ Variables ============ */
+  :root {
+    --ink: #0a0a0a;
+    --paper: #ffffff;
+    --mute: #8f8f8f;
+    --line: #e6e6e6;
+    --wash: #f5f5f5;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+            "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --serif: "Iowan Old Style", "Source Han Serif SC", "Songti SC",
+             "Times New Roman", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+ 
+  * { box-sizing: border-box; }
+ 
+  html, body { height: 100%; }
+ 
+  body {
+    margin: 0;
+    font-family: var(--font);
+    color: var(--ink);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+ 
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #dcdcdc; }
+  ::-webkit-scrollbar-thumb:hover { background: #c4c4c4; }
+  ::-webkit-scrollbar-track { background: transparent; }
+ 
+  /* ============ Header ============ */
+  header {
+    flex: 0 0 auto;
+    height: 60px;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--ink);
+  }
+ 
+  .brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+ 
+  .brand h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: .3em;
+    text-transform: uppercase;
+  }
+ 
+  .brand .sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .16em;
+    color: var(--mute);
+  }
+ 
+  .head-right { display: flex; align-items: center; gap: 14px; min-width: 0; }
+ 
+  #status {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .06em;
+    color: var(--mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 34ch;
+  }
+ 
+  button {
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    background: var(--ink);
+    color: var(--paper);
+    border: 0;
+    padding: 9px 16px;
+    cursor: pointer;
+    transition: opacity .15s ease;
+  }
+  button:hover { opacity: .78; }
+ 
+  /* ============ Main ============ */
+  main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) 1fr;
+  }
+ 
+  /* ---- Sidebar index ---- */
+  #sidebar {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+  }
+ 
+  .searchbar {
+    position: relative;
+    flex: 0 0 auto;
+    border-bottom: 1px solid var(--line);
+  }
+ 
+  #search {
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    letter-spacing: .02em;
+    color: inherit;
+    padding: 15px 46px 15px 20px;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  #search::placeholder { color: var(--mute); }
+  #search:focus { box-shadow: inset 0 -1px 0 var(--ink); }
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+ 
+  .kbd {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--mute);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    padding: 1px 5px;
+    pointer-events: none;
+  }
+ 
+  #count {
+    flex: 0 0 auto;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--mute);
+  }
+ 
+  #list {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-y: auto;
+  }
+ 
+  .item {
+    padding: 14px 20px 15px;
+    border-bottom: 1px solid var(--line);
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    transition: background .12s ease, border-color .12s ease;
+  }
+  .item:hover { background: var(--wash); }
+  .item.active { background: var(--wash); border-left-color: var(--ink); }
+ 
+  .item-title {
+    margin: 0 0 5px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+ 
+  .item-snippet {
+    margin: 0 0 7px;
+    font-size: 11.5px;
+    line-height: 1.75;
+    color: #666;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+ 
+  .item-meta {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .08em;
+    color: var(--mute);
+  }
+ 
+  .hint {
+    padding: 30px 20px;
+    text-align: center;
+    font-size: 12px;
+    line-height: 1.9;
+    letter-spacing: .04em;
+    color: var(--mute);
+  }
+  .hint code {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+  }
+ 
+  /* ---- Reader ---- */
+  #reader {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+  }
+ 
+  #readerInner { flex: 1 0 auto; display: flex; flex-direction: column; }
+ 
+  .doc {
+    max-width: 640px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 56px 32px 120px;
+  }
+ 
+  .back {
+    display: none;
+    margin-bottom: 22px;
+    padding: 0;
+    background: none;
+    color: var(--mute);
+    font-size: 11px;
+    letter-spacing: .12em;
+  }
+  .back:hover { color: var(--ink); opacity: 1; }
+ 
+  .doc-meta {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--mute);
+    margin-bottom: 18px;
+    word-break: break-all;
+  }
+ 
+  .doc-title {
+    margin: 0 0 30px;
+    font-family: var(--serif);
+    font-size: 32px;
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: .01em;
+  }
+ 
+  .doc-body p {
+    margin: 0 0 1.15em;
+    font-family: var(--serif);
+    font-size: 16.5px;
+    line-height: 2;
+    word-break: break-word;
+  }
+ 
+  .empty {
+    margin: auto;
+    padding: 40px;
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: .24em;
+    text-transform: uppercase;
+    color: var(--mute);
+  }
+ 
+  mark {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0 1px;
+    border-radius: 1px;
+  }
+ 
+  /* ============ Responsive ============ */
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; }
+    #sidebar { border-right: 0; }
+    #reader { display: none; }
+    body.reading #sidebar { display: none; }
+    body.reading #reader { display: flex; }
+ 
+    .brand .sub { display: none; }
+    #status { max-width: 14ch; }
+    .doc { padding: 26px 22px 90px; }
+    .doc-title { font-size: 25px; }
+    .doc-body p { font-size: 16px; line-height: 1.95; }
+    .back { display: inline-flex; }
+  }
+</style>
+</head>
+<body>
+ 
+<header>
+  <div class="brand">
+    <h1>Gravel</h1>
+  </div>
+  <div class="head-right">
+    <span id="status">Loading…</span>
+  </div>
+</header>
+ 
+<main>
+  <section id="sidebar">
+    <div class="searchbar">
+      <input id="search" type="search" autocomplete="off" spellcheck="false" />
+      <kbd class="kbd">/</kbd>
+    </div>
+    <div id="count" hidden></div>
+    <ul id="list"></ul>
+  </section>
+ 
+  <article id="reader">
+    <div id="readerInner"></div>
+  </article>
+</main>
+ 
+<script>
+(function () {
+  'use strict';
+ 
+  /* Index generated by build-index.py (the GitHub Action runs it on every push) */
+  const INDEX_URL = 'stories.json';
+ 
+  /* ---------------- DOM ---------------- */
+  const $ = (sel) => document.querySelector(sel);
+  const els = {
+    status:      $('#status'),
+    search:      $('#search'),
+    count:       $('#count'),
+    list:        $('#list'),
+    reader:      $('#reader'),
+    readerInner: $('#readerInner')
+  };
+ 
+  const EMPTY_READER = '';
+ 
+  /* ---------------- State ---------------- */
+  const state = {
+    stories: [],    // all stories
+    results: [],    // current search results
+    query: '',      // lowercased query
+    activeId: null, // open story id
+    loaded: false,
+    error: false
+  };
+ 
+  /* ---------------- Helpers ---------------- */
+  const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ESC_MAP[c]);
+ 
+  const encodePath = (p) => p.split('/').map(encodeURIComponent).join('/');
+ 
+  const fmt = (n) => n.toLocaleString('en-US');
+  const plural = (n, word) => `${fmt(n)} ${word}${n === 1 ? '' : 's'}`;
+  const storyCount = (n) => (n === 1 ? '1 story' : `${fmt(n)} stories`);
+ 
+  /* Counts English words; CJK characters count one each */
+  const CJK = '\\u3040-\\u30ff\\u3400-\\u9fff\\uf900-\\ufaff\\uac00-\\ud7af';
+  const WORD_RE = new RegExp(`[${CJK}]|[^\\s${CJK}]+`, 'g');
+  const countWords = (t) => (t.match(WORD_RE) || []).length;
+ 
+  /** Highlight every match in plain text (escape first, then wrap in <mark>) */
+  function highlight(text, q) {
+    if (!q) return escapeHtml(text);
+    const lower = text.toLowerCase();
+    let i = 0, out = '';
+    for (;;) {
+      const j = lower.indexOf(q, i);
+      if (j === -1) { out += escapeHtml(text.slice(i)); break; }
+      out += escapeHtml(text.slice(i, j));
+      out += '<mark>' + escapeHtml(text.slice(j, j + q.length)) + '</mark>';
+      i = j + q.length;
+    }
+    return out;
+  }
+ 
+  /** Build a story object from an index entry */
+  function makeStory(i, entry) {
+    const path = String(entry.path);
+    const name = path.split('/').pop();
+    const text = String(entry.text || '')
+      .replace(/^\uFEFF/, '')
+      .replace(/\r\n?/g, '\n')
+      .trim();
+    const title = name.replace(/\.txt$/i, '');
+    return {
+      id: 's' + i,
+      path,
+      slug: path.replace(/\.txt$/i, ''),
+      title,
+      text,
+      lower: text.toLowerCase(),
+      titleLower: title.toLowerCase(),
+      words: countWords(text)
+    };
+  }
+ 
+  function leadSnippet(text) {
+    const flat = text.replace(/\s+/g, ' ');
+    return flat.length > 120 ? flat.slice(0, 120) + '…' : flat;
+  }
+ 
+  function snippetAround(text, idx, q) {
+    if (idx === -1) return leadSnippet(text);
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(text.length, idx + q.length + 100);
+    const body = text.slice(start, end).replace(/\s+/g, ' ');
+    return (start > 0 ? '…' : '') + body + (end < text.length ? '…' : '');
+  }
+ 
+  const setStatus = (t) => { els.status.textContent = t; };
+ 
+  /* ---------------- URL hash (shareable links to a story) ---------------- */
+  function slugFromHash() {
+    try { return decodeURIComponent(location.hash.slice(1)); }
+    catch (e) { return ''; }
+  }
+ 
+  function setHash(slug) {
+    const url = location.pathname + location.search + (slug ? '#' + encodePath(slug) : '');
+    history.replaceState(null, '', url);
+  }
+ 
+  /* ---------------- Search ---------------- */
+  function computeResults() {
+    const q = state.query;
+ 
+    if (!q) {
+      state.results = state.stories.map((s) => ({ story: s, snippet: leadSnippet(s.text) }));
+      return;
+    }
+ 
+    const hits = [];
+    for (const s of state.stories) {
+      const idx = s.lower.indexOf(q);
+      const inTitle = s.titleLower.indexOf(q) !== -1;
+      if (idx === -1 && !inTitle) continue;
+      hits.push({ story: s, idx, inTitle, snippet: snippetAround(s.text, idx, q) });
+    }
+ 
+    hits.sort((a, b) => {
+      if (a.inTitle !== b.inTitle) return a.inTitle ? -1 : 1;
+      const ai = a.idx === -1 ? Infinity : a.idx;
+      const bi = b.idx === -1 ? Infinity : b.idx;
+      return ai - bi;
+    });
+ 
+    state.results = hits;
+  }
+ 
+  /* ---------------- Render: index list ---------------- */
+  function renderList() {
+    const q = state.query;
+    const n = state.results.length;
+ 
+    els.count.textContent = !state.stories.length ? ''
+      : q ? `${fmt(n)} / ${fmt(state.stories.length)} matches`
+      : storyCount(state.stories.length);
+    els.count.hidden = !state.stories.length;
+ 
+    if (state.error) {
+      els.list.innerHTML = '';
+      return;
+    }
+ 
+    if (!state.loaded) {
+      els.list.innerHTML = '<li class="hint">Loading stories…</li>';
+      return;
+    }
+ 
+    if (!state.stories.length) {
+      els.list.innerHTML = '<li class="hint">No stories yet.<br>Add a <code>.txt</code> file to the repo and push.</li>';
+      return;
+    }
+ 
+    if (!n) {
+      els.list.innerHTML =
+        `<li class="hint">No stories match “${escapeHtml(q)}”</li>`;
+      return;
+    }
+ 
+    els.list.innerHTML = state.results.map(({ story, snippet }) => `
+      <li class="item${story.id === state.activeId ? ' active' : ''}" data-id="${story.id}">
+        <p class="item-title">${highlight(story.title, q)}</p>
+        <p class="item-snippet">${highlight(snippet, q)}</p>
+        <p class="item-meta">${plural(story.words, 'word')}</p>
+      </li>`).join('');
+  }
+ 
+  /* ---------------- Render: reader ---------------- */
+  function renderReader(story, keepScroll) {
+    const q = state.query;
+    const paras = story.text.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+    const doHighlight = story.text.length <= 60000;
+    const scroll = els.reader.scrollTop;
+ 
+    els.readerInner.innerHTML = `
+      <div class="doc">
+        <button class="back" type="button" id="backBtn">← Back to index</button>
+        <div class="doc-meta">${escapeHtml(story.path)} · ${plural(story.words, 'word')}</div>
+        <h2 class="doc-title">${escapeHtml(story.title)}</h2>
+        <div class="doc-body">
+          ${paras.map((p) => `<p>${doHighlight ? highlight(p, q) : escapeHtml(p)}</p>`).join('')}
+        </div>
+      </div>`;
+ 
+    els.reader.scrollTop = keepScroll ? scroll : 0;
+  }
+ 
+  function markActive() {
+    els.list.querySelectorAll('.item').forEach((el) => {
+      el.classList.toggle('active', el.dataset.id === state.activeId);
+    });
+  }
+ 
+  function openStory(id) {
+    const story = state.stories.find((s) => s.id === id);
+    if (!story) return;
+ 
+    state.activeId = id;
+    document.body.classList.add('reading');
+    markActive();
+    renderReader(story, false);
+    setHash(story.slug);
+  }
+ 
+  function closeStory() {
+    state.activeId = null;
+    document.body.classList.remove('reading');
+    markActive();
+    els.readerInner.innerHTML = EMPTY_READER;
+    setHash('');
+  }
+ 
+  function openFromHash() {
+    const slug = slugFromHash();
+    if (!slug) {
+      if (state.activeId) closeStory();
+      return;
+    }
+    const story = state.stories.find((s) => s.slug === slug || s.path === slug);
+    if (!story || story.id === state.activeId) return;
+    openStory(story.id);
+    const li = els.list.querySelector(`.item[data-id="${story.id}"]`);
+    if (li) li.scrollIntoView({ block: 'nearest' });
+  }
+ 
+  /* ---------------- Load index ---------------- */
+  async function load() {
+    setStatus('Loading…');
+    renderList();
+ 
+    try {
+      const res = await fetch(INDEX_URL, { cache: 'no-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      const entries = (Array.isArray(data) ? data : (data.stories || []))
+        .map((e) => (typeof e === 'string' ? { path: e } : e))
+        .filter((e) => e && e.path);
+ 
+      // Entries without inline text are fetched individually
+      const stories = await Promise.all(entries.map(async (e, i) => {
+        if (typeof e.text !== 'string') {
+          try {
+            const r = await fetch(encodePath(e.path), { cache: 'no-cache' });
+            e = Object.assign({}, e, { text: r.ok ? await r.text() : '' });
+          } catch (err) {
+            console.warn('Could not read', e.path, err);
+            e = Object.assign({}, e, { text: '' });
+          }
+        }
+        return makeStory(i, e);
+      }));
+ 
+      stories.sort((a, b) =>
+        a.title.localeCompare(b.title, 'en', { numeric: true, sensitivity: 'base' })
+      );
+ 
+      state.stories = stories;
+      state.loaded = true;
+      computeResults();
+      renderList();
+      setStatus(storyCount(stories.length));
+      openFromHash();
+    } catch (err) {
+      console.warn('Failed to load index:', err);
+      state.error = true;
+      renderList();
+      setStatus('');
+    }
+  }
+ 
+  /* ---------------- Events ---------------- */
+ 
+  /* Search (throttled with rAF) */
+  let rafId = 0;
+  els.search.addEventListener('input', () => {
+    state.query = els.search.value.trim().toLowerCase();
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      computeResults();
+      renderList();
+      const active = state.stories.find((s) => s.id === state.activeId);
+      if (active) renderReader(active, true);   // keep reader highlights in sync
+    });
+  });
+ 
+  els.search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const first = els.list.querySelector('.item');
+      if (first) openStory(first.dataset.id);
+    }
+  });
+ 
+  /* List clicks */
+  els.list.addEventListener('click', (e) => {
+    const li = e.target.closest('.item');
+    if (li) openStory(li.dataset.id);
+  });
+ 
+  /* Back button (mobile) */
+  els.readerInner.addEventListener('click', (e) => {
+    if (e.target.id === 'backBtn') closeStory();
+  });
+ 
+  /* Links like gravel/#my-story */
+  window.addEventListener('hashchange', openFromHash);
+ 
+  /* Global shortcuts */
+  window.addEventListener('keydown', (e) => {
+    const tag = document.activeElement && document.activeElement.tagName;
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA';
+ 
+    if (e.key === '/' && !typing) {
+      e.preventDefault();
+      els.search.focus();
+    }
+ 
+    if (e.key === 'Escape' && document.activeElement === els.search) {
+      els.search.value = '';
+      state.query = '';
+      computeResults();
+      renderList();
+      const active = state.stories.find((s) => s.id === state.activeId);
+      if (active) renderReader(active, true);
+    }
+  });
+ 
+  /* ---------------- Start ---------------- */
+  load();
+})();
+</script>
+</body>
+</html>
