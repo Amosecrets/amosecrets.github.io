@@ -326,7 +326,6 @@
       <input id="search" type="search" autocomplete="off" spellcheck="false" />
       <kbd class="kbd">/</kbd>
     </div>
-    <div id="count" hidden></div>
     <ul id="list"></ul>
   </section>
  
@@ -347,7 +346,6 @@
   const els = {
     status:      $('#status'),
     search:      $('#search'),
-    count:       $('#count'),
     list:        $('#list'),
     reader:      $('#reader'),
     readerInner: $('#readerInner')
@@ -474,10 +472,6 @@
     const q = state.query;
     const n = state.results.length;
  
-    els.count.textContent = !state.stories.length ? ''
-      : q ? `${fmt(n)} / ${fmt(state.stories.length)} matches`
-      : storyCount(state.stories.length);
-    els.count.hidden = !state.stories.length;
  
     if (state.error) {
       els.list.innerHTML = '';
@@ -495,8 +489,7 @@
     }
  
     if (!n) {
-      els.list.innerHTML =
-        `<li class="hint">No stories match “${escapeHtml(q)}”</li>`;
+      els.list.innerHTML = '';
       return;
     }
  
@@ -504,7 +497,6 @@
       <li class="item${story.id === state.activeId ? ' active' : ''}" data-id="${story.id}">
         <p class="item-title">${highlight(story.title, q)}</p>
         <p class="item-snippet">${highlight(snippet, q)}</p>
-        <p class="item-meta">${plural(story.words, 'word')}</p>
       </li>`).join('');
   }
  
@@ -518,7 +510,6 @@
     els.readerInner.innerHTML = `
       <div class="doc">
         <button class="back" type="button" id="backBtn">← Back to index</button>
-        <div class="doc-meta">${escapeHtml(story.path)} · ${plural(story.words, 'word')}</div>
         <h2 class="doc-title">${escapeHtml(story.title)}</h2>
         <div class="doc-body">
           ${paras.map((p) => `<p>${doHighlight ? highlight(p, q) : escapeHtml(p)}</p>`).join('')}
@@ -601,7 +592,7 @@
       state.loaded = true;
       computeResults();
       renderList();
-      setStatus(storyCount(stories.length));
+      setStatus('');
       openFromHash();
     } catch (err) {
       console.warn('Failed to load index:', err);
